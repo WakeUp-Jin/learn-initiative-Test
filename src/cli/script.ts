@@ -6,6 +6,7 @@ import { join } from 'path';
 import open from 'open';
 import Handlebars from 'handlebars';
 import { themes } from './themes.js';
+import { config, logger } from '../config.js';
 
 interface ActivityItem {
   title: string;
@@ -53,6 +54,8 @@ interface OutputData {
 }
 
 async function getUserInput(): Promise<UserInput> {
+  logger.info('脚本HTML生成器启动');
+  logger.dev('用户交互开始');
   console.log('🚀 欢迎使用脚本HTML生成器！\n');
 
   const response = await prompts([
@@ -86,7 +89,7 @@ async function getUserInput(): Promise<UserInput> {
         { title: '浅色主题', value: 'light' },
         { title: '深色主题', value: 'dark' }
       ],
-      initial: 0
+      initial: config.defaultTheme === 'light' ? 0 : 1
     },
     {
       type: (prev, values) => values.templateType === 'oboe-course' ? 'text' : null,
@@ -120,14 +123,20 @@ async function getUserInput(): Promise<UserInput> {
   ]);
 
   if (Object.keys(response).length === 0) {
+    logger.warn('用户取消操作');
     console.log('✋ 操作已取消');
     process.exit(0);
   }
 
+  logger.dev(`用户选择: ${response.templateType} 模板`);
+  logger.debug(`用户输入: ${JSON.stringify(response, null, 2)}`);
+  
   return response as UserInput;
 }
 
 function generateOutputData(input: UserInput): OutputData {
+  logger.dev('开始生成输出数据');
+  
   const baseData: OutputData = {
     title: input.title,
     timestamp: new Date().toISOString(),
@@ -138,16 +147,17 @@ function generateOutputData(input: UserInput): OutputData {
   };
 
   if (input.templateType === 'simple') {
+    logger.dev('生成简单页面数据');
     return {
       ...baseData,
       content: input.content,
       theme: input.theme
     };
   } else {
-    // Oboe course template
+    logger.dev('生成Oboe课程数据');
     return {
       ...baseData,
-      siteName: 'Oboe',
+      siteName: config.siteName,
       courseTitle: input.title,
       courseSubtitle: input.courseSubtitle,
       courseDescription: input.courseDescription,
@@ -261,7 +271,10 @@ function getDefaultTopicList(): string[] {
 
 function generateHTML(data: OutputData, templateType: 'simple' | 'oboe-course'): string {
   const templateName = templateType === 'simple' ? 'page' : 'oboe-course';
-  const templatePath = join('./templates', `${templateName}.hbs`);
+  const templatePath = join(config.templatesDir, `${templateName}.hbs`);
+  
+  logger.dev(`使用模板: ${templatePath}`);
+  
   const templateSource = readFileSync(templatePath, 'utf-8');
   const template = Handlebars.compile(templateSource);
   
@@ -275,50 +288,59 @@ function generateHTML(data: OutputData, templateType: 'simple' | 'oboe-course'):
       version: data.metadata.version,
       ...themeConfig
     };
+    logger.debug(`简单页面变量: ${Object.keys(templateVariables).join(', ')}`);
     return template(templateVariables);
   } else {
+    logger.debug(`Oboe课程变量: ${Object.keys(data).join(', ')}`);
     return template(data);
   }
 }
 
 async function saveFiles(data: OutputData, format: string, templateType: 'simple' | 'oboe-course'): Promise<string[]> {
-  const outputDir = './output';
-  if (!existsSync(outputDir)) {
-    mkdirSync(outputDir, { recursive: true });
+  if (!existsSync(config.outputDir)) {
+    mkdirSync(config.outputDir, { recursive: true });
+    logger.dev(`创建输出目录: ${config.outputDir}`);
   }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const savedFiles: string[] = [];
   const prefix = templateType === 'simple' ? 'output' : 'oboe-course';
 
+  logger.info(`开始保存文件，格式: ${format}`);
+
   if (format === 'json' || format === 'both') {
-    const jsonPath = join(outputDir, `${prefix}-${timestamp}.json`);
+    const jsonPath = join(config.outputDir, `${prefix}-${timestamp}.json`);
     writeFileSync(jsonPath, JSON.stringify(data, null, 2), 'utf-8');
     savedFiles.push(jsonPath);
+    logger.success(`JSON文件已保存: ${jsonPath}`);
     console.log(`✅ JSON文件已保存: ${jsonPath}`);
   }
 
   if (format === 'html' || format === 'both') {
     const htmlContent = generateHTML(data, templateType);
-    const htmlPath = join(outputDir, `${prefix}-${timestamp}.html`);
+    const htmlPath = join(config.outputDir, `${prefix}-${timestamp}.html`);
     writeFileSync(htmlPath, htmlContent, 'utf-8');
     savedFiles.push(htmlPath);
+    logger.success(`HTML文件已保存: ${htmlPath}`);
     console.log(`✅ HTML文件已保存: ${htmlPath}`);
   }
 
+  logger.info(`文件保存完成，共 ${savedFiles.length} 个文件`);
   return savedFiles;
 }
 
 async function main() {
   try {
+    logger.info('应用启动');
     const userInput = await getUserInput();
     const outputData = generateOutputData(userInput);
     
+    logger.info('开始生成文件');
     console.log('\n📝 正在生成文件...');
     const savedFiles = await saveFiles(outputData, userInput.outputFormat, userInput.templateType);
     
     const htmlFile = savedFiles.find(file => file.endsWith('.html'));
-    if (htmlFile) {
+    if (htmlFile && config.autoOpenBrowser) {
       const shouldOpen = await prompts({
         type: 'confirm',
         name: 'openFile',
@@ -328,12 +350,17 @@ async function main() {
 
       if (shouldOpen.openFile) {
         await open(htmlFile);
+        logger.success('HTML文件已在浏览器中打开');
         console.log('🌐 HTML文件已在浏览器中打开');
       }
+    } else if (htmlFile && !config.autoOpenBrowser) {
+      logger.dev('自动打开浏览器被禁用');
     }
 
+    logger.info('任务完成');
     console.log('\n🎉 任务完成！');
   } catch (error) {
+    logger.error(`应用执行失败: ${error}`);
     console.error('❌ 发生错误:', error);
     process.exit(1);
   }

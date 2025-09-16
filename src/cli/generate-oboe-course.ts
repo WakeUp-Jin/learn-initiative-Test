@@ -4,6 +4,7 @@ import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import open from 'open';
 import Handlebars from 'handlebars';
+import { config, logger } from '../config.js';
 
 interface ActivityItem {
   title: string;
@@ -31,9 +32,11 @@ interface OboeCourseData {
 }
 
 function generateOboeCourse(): void {
+  logger.info('开始生成Oboe课程页面');
+  
   // 从图片中提取的数据
   const courseData: OboeCourseData = {
-    siteName: 'Oboe',
+    siteName: config.siteName,
     courseTitle: 'Finding Your Ideal Trousers',
     courseSubtitle: 'for Every Occasion',
     courseDescription: 'This course explores the principles of selecting pants that flatter your body type, suit different occasions, and reflect your personal style.',
@@ -137,27 +140,35 @@ function generateOboeCourse(): void {
   };
 
   // 生成HTML
-  const templatePath = join('./templates', 'oboe-course.hbs');
+  const templatePath = join(config.templatesDir, 'oboe-course.hbs');
+  logger.dev(`使用模板: ${templatePath}`);
+  
   const templateSource = readFileSync(templatePath, 'utf-8');
   const template = Handlebars.compile(templateSource);
   const html = template(courseData);
 
   // 保存文件
-  const outputDir = './output';
-  if (!existsSync(outputDir)) {
-    mkdirSync(outputDir, { recursive: true });
+  if (!existsSync(config.outputDir)) {
+    mkdirSync(config.outputDir, { recursive: true });
+    logger.dev(`创建输出目录: ${config.outputDir}`);
   }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const htmlPath = join(outputDir, `oboe-course-${timestamp}.html`);
+  const htmlPath = join(config.outputDir, `oboe-course-${timestamp}.html`);
   
   writeFileSync(htmlPath, html, 'utf-8');
   
+  logger.success(`Oboe课程页面已生成: ${htmlPath}`);
   console.log(`✅ Oboe课程页面已生成: ${htmlPath}`);
   
   // 自动打开浏览器
-  open(htmlPath);
-  console.log('🌐 页面已在浏览器中打开');
+  if (config.autoOpenBrowser) {
+    open(htmlPath);
+    logger.success('页面已在浏览器中打开');
+    console.log('🌐 页面已在浏览器中打开');
+  } else {
+    logger.dev('自动打开浏览器被禁用');
+  }
 }
 
 // 立即生成
